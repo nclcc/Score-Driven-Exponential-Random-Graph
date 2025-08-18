@@ -1,3 +1,33 @@
-# Score-Driven-Exponential-Random-Graph
-In thermodynamics, entropy is a measure of the disorder or randomness of a system. While entropy can be positive or negative, the entropy of a system tends to increase over time, making the overall change in entropy positive. This is because systems naturally evolve towards states of greater disorder and randomness. 
-In order to study how systems evolve over time, a grasp of the pivotal work by Aleksandr Bogdanov on **tectology** deserves a mention. Systems show three types of organization, he mentioned: organized systems (low entropy systems) where the total is higher than the sum of its part, disorganized systems where the total is lower than the sum of its part and neutral systems where the forces mentioned above compensate each others. Except of rare cases where there is an entire collapse of an entity, in nature we typically observe low entropy systems that evolve towards out of equilibrium status with quite spread networks. By looking at the work of D. Di Gangi, G. Bormetti, and F. Lillo (2024), this repository provides meaningful tools that allow for the entropy tracking of a system beside its inner dynamics.
+# Score-Driven Exponential Random Graph Models
+
+## Understanding System Evolution Through Network Dynamics
+
+Nature presents us with fascinating examples of self-organization and evolution. From the intricate patterns of neural networks to the complex structures of ecological systems, we observe a fundamental principle: systems naturally evolve from states of order toward greater complexity and interconnectedness.
+
+Drawing inspiration from thermodynamics, we know that entropy serves as a powerful measure of system organization. While entropy typically increases over time as systems move toward greater randomness, this process reveals profound insights about how complex networks emerge and adapt.
+
+## Theoretical Foundation
+
+This work builds upon the pioneering insights of **Aleksandr Bogdanov's tectology**, which identified three fundamental types of system organization:
+
+- **Organized systems** (low entropy) - where collective behavior exceeds the sum of individual components
+- **Disorganized systems** - where fragmentation reduces overall system effectiveness  
+- **Neutral systems** - where organizing and disorganizing forces reach dynamic equilibrium
+
+Rather than viewing entropy increase as purely destructive, we recognize that most natural systems demonstrate remarkable resilience. They evolve toward out-of-equilibrium states with rich, distributed network structures that enable adaptation and growth.
+
+## Research Foundation
+
+This repository implements computational tools inspired by the groundbreaking work of **D. Di Gangi, G. Bormetti, and F. Lillo** (2024) on score-driven exponential random graph models. Their research provides a mathematical framework for tracking both entropy changes and the underlying network dynamics that drive system evolution.
+
+**Link to the main work:** [Score-driven exponential random graph models (Di Gangi, Bormetti & Lillo, 2024)](https://arxiv.org/abs/[paper-id])
+
+## What This Repository Offers
+
+These tools enable researchers and practitioners to:
+- Monitor entropy evolution in complex network systems
+- Understand the relationship between local interactions and global organization
+- Model how systems maintain coherence while adapting to change
+- Explore the mathematical beauty underlying natural self-organization processes
+
+By combining rigorous mathematical modeling with intuitive understanding of system dynamics, this work opens new pathways for studying everything from social networks to biological systems, financial markets to technological infrastructures.
