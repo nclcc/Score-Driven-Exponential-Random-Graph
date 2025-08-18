@@ -20,7 +20,7 @@ Rather than viewing entropy increase as purely destructive, we recognize that mo
 
 This repository implements computational tools inspired by the groundbreaking work of **D. Di Gangi, G. Bormetti, and F. Lillo** (2024) on score-driven exponential random graph models. Their research provides a mathematical framework for tracking both entropy changes and the underlying network dynamics that drive system evolution.
 
-**Link to the main work:** [Score-driven exponential random graph models (Di Gangi, Bormetti & Lillo, 2024)](https://arxiv.org/abs/[paper-id])
+**Link to the main work:** [Score-driven exponential random graph models (Di Gangi, Bormetti & Lillo, 2024)]([https://arxiv.org/abs/[paper-id]](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3394593))
 
 ## What This Repository Offers
 
