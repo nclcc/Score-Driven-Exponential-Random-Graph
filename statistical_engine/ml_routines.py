@@ -1,9 +1,8 @@
 import warnings
 
 import numpy as np
+import scipy.optimize as opt
 from typing import Tuple, List, Optional
-from scipy.optimize import minimize
-from data_handler.data_structures import NetworkStatistic
 
 
 class FastBetaModel:
@@ -122,7 +121,7 @@ class FastPseudoLikelihood:
       - mle_estimate(adjacency_matrix, initial_params=None)
     """
 
-    def __init__(self, statistics: Optional[List[NetworkStatistic]] = None, n_nodes: Optional[int] = None):
+    def __init__(self, statistics: Optional[List] = None, n_nodes: Optional[int] = None):
         """
         statistics : list of NetworkStatistic objects used for ERGM pseudo-likelihood (optional).
         n_nodes : required if you plan to use the beta-model-compatible methods (in/out params).

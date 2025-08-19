@@ -1,14 +1,12 @@
 import numpy as np
 import scipy.optimize as opt
+import scipy.stats as stats
 from typing import List, Optional, Tuple, Dict
+
 
 # =============================================================================
 # SCORE-DRIVEN ERGM FRAMEWORK
 # =============================================================================
-from data_handler.data_structures import EdgesStatistic, SDERGMParams, GWESPStatistic, ReciprocityStatistic, \
-    ConcentrationStatistic, SizeHeterogeneityStatistic
-from statistical_engine.ml_routines import FastBetaModel, FastPseudoLikelihood
-
 
 class ScoreDrivenERGM:
     """Main Score-Driven ERGM implementation"""
@@ -17,10 +15,15 @@ class ScoreDrivenERGM:
         self.model_type = model_type
 
         if model_type == 'beta':
+            # Import here to avoid circular import
+            from statistical_engine.ml_routines import FastBetaModel
             self.n_nodes = kwargs.get('n_nodes', 10)
             self.model = FastBetaModel(self.n_nodes)
             self.n_params = 2 * self.n_nodes  # in + out parameters
         elif model_type == 'pseudo':
+            # Import here to avoid circular import
+            from statistical_engine.ml_routines import FastPseudoLikelihood
+            from data_handler.data_structures import EdgesStatistic
             self.statistics = kwargs.get('statistics', [EdgesStatistic()])
             self.model = FastPseudoLikelihood(self.statistics)
             self.n_params = len(self.statistics)
@@ -80,7 +83,7 @@ class ScoreDrivenERGM:
 
     def update_parameters(self, adjacency_matrix: np.ndarray,
                           theta_current: np.ndarray,
-                          sd_params: SDERGMParams,
+                          sd_params,  # Remove type hint to avoid import
                           scaling_matrix: Optional[np.ndarray] = None) -> np.ndarray:
         """Score-driven parameter update rule"""
         # Compute score
@@ -103,7 +106,7 @@ class ScoreDrivenERGM:
         return theta_new
 
     def filter_parameters(self, adjacency_sequence: List[np.ndarray],
-                          sd_params: SDERGMParams,
+                          sd_params,  # Remove type hint to avoid import
                           theta_init: Optional[np.ndarray] = None) -> np.ndarray:
         """Filter time-varying parameters using score-driven dynamics"""
         T = len(adjacency_sequence)
@@ -159,8 +162,10 @@ class ScoreDrivenERGM:
         return log_lik
 
     def estimate_static_parameters(self, adjacency_sequence: List[np.ndarray],
-                                   theta_filtered: np.ndarray) -> SDERGMParams:
+                                   theta_filtered: np.ndarray):  # Remove type hint
         """Estimate static parameters w, alpha, beta via MLE"""
+        from data_handler.data_structures import SDERGMParams
+
         T, n_params = theta_filtered.shape
 
         # Initialize parameters
@@ -202,10 +207,14 @@ class HierarchicalSDERGM:
         self.layer_models = []
         for layer in range(n_layers):
             if shared_statistics:
+                # Import here to avoid circular import
+                from data_handler.data_structures import EdgesStatistic, GWESPStatistic
                 # Same statistics across layers
                 statistics = [EdgesStatistic(), GWESPStatistic()]
                 model = ScoreDrivenERGM(model_type='pseudo', statistics=statistics)
             else:
+                # Import here to avoid circular import
+                from data_handler.data_structures import EdgesStatistic, GWESPStatistic
                 # Layer-specific statistics (could be different)
                 statistics = [EdgesStatistic(), GWESPStatistic(decay=0.5 + 0.1 * layer)]
                 model = ScoreDrivenERGM(model_type='pseudo', statistics=statistics)
@@ -215,6 +224,8 @@ class HierarchicalSDERGM:
     def filter_multilayer_parameters(self, multilayer_sequence: List[List[np.ndarray]],
                                      cross_layer_coupling: float = 0.1) -> List[np.ndarray]:
         """Filter parameters across multiple network layers with coupling"""
+        from data_handler.data_structures import SDERGMParams
+
         T = len(multilayer_sequence)
 
         # Initialize parameters for each layer
@@ -306,7 +317,7 @@ class RobustSDERGM:
         return robust_score, is_outlier
 
     def robust_filter_parameters(self, adjacency_sequence: List[np.ndarray],
-                                 sd_params: SDERGMParams) -> Tuple[np.ndarray, List[bool]]:
+                                 sd_params) -> Tuple[np.ndarray, List[bool]]:  # Remove type hint
         """Filter parameters with robust score computation"""
         T = len(adjacency_sequence)
         theta_filtered = np.zeros((T, self.base_model.n_params))
@@ -352,7 +363,7 @@ class OnlineSDERGM:
         self.t = 0
 
     def online_update(self, new_adjacency: np.ndarray,
-                      sd_params: SDERGMParams) -> np.ndarray:
+                      sd_params) -> np.ndarray:  # Remove type hint
         """Process single new observation online"""
         if self.current_theta is None:
             raise ValueError("Must initialize online filtering first")
@@ -408,6 +419,8 @@ class BayesianSDERGM:
     def mcmc_estimation(self, adjacency_sequence: List[np.ndarray],
                         n_samples: int = 1000, n_burn: int = 500) -> Dict:
         """MCMC estimation of SD-ERGM parameters with full uncertainty"""
+        from data_handler.data_structures import SDERGMParams
+
         T = len(adjacency_sequence)
         n_params = self.base_model.n_params
 
@@ -511,6 +524,10 @@ class FinancialNetworkApplication:
     def __init__(self, n_banks: int):
         self.n_banks = n_banks
 
+        # Import here to avoid circular import
+        from data_handler.data_structures import (EdgesStatistic, ReciprocityStatistic,
+                                                  ConcentrationStatistic, SizeHeterogeneityStatistic)
+
         # Financial-specific statistics
         self.statistics = [
             EdgesStatistic(),  # Total exposures
@@ -552,7 +569,7 @@ class FinancialNetworkApplication:
         return risk_indicator
 
     def stress_testing(self, baseline_theta: np.ndarray,
-                       stress_scenarios: List[Dict]) -> Dict:
+                       stress_scenarios: Dict) -> Dict:  # Changed from List[Dict]
         """Conduct stress testing on financial network"""
         results = {}
 

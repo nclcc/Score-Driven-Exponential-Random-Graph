@@ -12,14 +12,12 @@ import warnings
 from typing import Dict
 
 import numpy as np
-
+import scipy.optimize as opt
 # Import all required modules
 from data_handler.data_structures import (
-    DataGenerator, SDERGMParams, EdgesStatistic, GWESPStatistic, TriangleStatistic,
-    TwoStarsStatistic, ReciprocityStatistic
+    DataGenerator, SDERGMParams, EdgesStatistic, GWESPStatistic, TriangleStatistic
 )
 from statistical_engine.evaluation_routine import ModelEvaluator
-from statistical_engine.ml_routines import FastBetaModel, FastPseudoLikelihood
 from statistical_engine.score_random_network import (
     ScoreDrivenERGM, HierarchicalSDERGM, RobustSDERGM,
     OnlineSDERGM, BayesianSDERGM, FinancialNetworkApplication
@@ -830,6 +828,8 @@ class SDERGMTestSuite:
         # -----------------------
         self._print("Testing Beta Model MLE...", 1)
 
+        from statistical_engine.ml_routines import FastBetaModel
+
         beta_model = FastBetaModel(n_nodes)
 
         # Generate true parameters
@@ -875,6 +875,12 @@ class SDERGMTestSuite:
         # ---------------------------------------------
         self._print("\nTesting Pseudo-Likelihood MLE with different statistics...", 1)
 
+        from data_handler.data_structures import (EdgesStatistic, ReciprocityStatistic,
+                                                  GWESPStatistic, TriangleStatistic,
+                                                  TwoStarsStatistic)
+        from statistical_engine.ml_routines import FastPseudoLikelihood
+        import scipy.optimize as opt
+
         statistics_combinations = [
             ('Edges only', [EdgesStatistic()]),
             ('Edges + Reciprocity', [EdgesStatistic(), ReciprocityStatistic()]),
@@ -906,78 +912,76 @@ class SDERGMTestSuite:
             # Create FastPseudoLikelihood instance with these statistics
             fpl = FastPseudoLikelihood(statistics=statistics)
 
-            # Bind adjacency; we minimize **negative** pseudo-LL via a tiny wrapper.
+            # Define objective function (minimize negative pseudo-likelihood)
+            def objective(theta):
+                return -fpl.log_pseudo_likelihood(test_network, theta)
 
+            # MLE estimation using scipy.optimize
+            start_time = time.time()
 
-def run_all_tests(config='quick', tests_to_run=None):
-    """
-    Simple function to run the SD-ERGM test suite
+            # Initialize with small random values
+            theta_init = np.random.normal(0, 0.1, n_params)
+            theta_init[0] = -2.0  # Start edges parameter at reasonable value
 
-    Args:
-        config: 'quick', 'basic', or 'advanced'
-        tests_to_run: List of test names, or None to run all
+            try:
+                result = opt.minimize(
+                    objective,
+                    theta_init,
+                    method='BFGS',
+                    options={'maxiter': 500, 'gtol': 1e-5}
+                )
+                est_theta = result.x
+                optimization_success = result.success
+            except Exception as e:
+                self._print(f"    Optimization failed: {e}", 3)
+                est_theta = theta_init
+                optimization_success = False
 
-    Example:
-        # Run all tests quickly
-        run_all_tests('quick')
+            mle_time = time.time() - start_time
 
-        # Run specific tests
-        run_all_tests('basic', ['beta_model', 'robust_filtering'])
-    """
-    # Initialize test suite
-    suite = SDERGMTestSuite(verbose=True, save_results=False)
+            # Compute errors
+            param_error = float(np.mean(np.abs(true_theta - est_theta)))
 
-    # Define all available tests
-    all_tests = [
-        'beta_model',
-        'pseudo_likelihood',
-        'robust_filtering',
-        'online_learning',
-        'hierarchical_networks',
-        'bayesian_inference',
-        'financial_application',
-        'scalability',
-        'convergence',
-        'mle_estimation'
-    ]
+            # Log-likelihood comparison
+            ll_true = float(fpl.log_pseudo_likelihood(test_network, true_theta))
+            ll_est = float(fpl.log_pseudo_likelihood(test_network, est_theta))
 
-    # Select tests to run
-    tests = tests_to_run if tests_to_run else all_tests
+            stat_result = {
+                'name': stat_name,
+                'n_parameters': n_params,
+                'estimation_time': mle_time,
+                'parameter_error': param_error,
+                'log_likelihood_true': ll_true,
+                'log_likelihood_estimated': ll_est,
+                'likelihood_improvement': ll_est - ll_true,
+                'optimization_success': optimization_success
+            }
 
-    print(f"\nRunning {len(tests)} tests with '{config}' configuration\n")
-    print("=" * 60)
+            results['statistics_comparison'].append(stat_result)
 
-    # Run each test
-    for i, test_name in enumerate(tests, 1):
-        print(f"\n[{i}/{len(tests)}] {test_name}")
-        print("-" * 40)
+            self._print(f"    Param error: {param_error:.4f}", 3)
+            self._print(f"    LL improvement: {ll_est - ll_true:.2f}", 3)
+            self._print(f"    Time: {mle_time:.3f}s", 3)
+            if not optimization_success:
+                self._print(f"    Warning: Optimization did not converge", 3)
 
-        try:
-            # Get test method
-            test_method = getattr(suite, f'test_{test_name}')
+        # Summary statistics
+        successful_tests = [r for r in results['statistics_comparison'] if r['optimization_success']]
+        if successful_tests:
+            avg_error = np.mean([r['parameter_error'] for r in successful_tests])
+            avg_time = np.mean([r['estimation_time'] for r in successful_tests])
 
-            # Run test (scalability doesn't need config)
-            if test_name == 'scalability':
-                test_method()
-            else:
-                test_method(config=config)
+            results['pseudo_likelihood'] = {
+                'n_successful_tests': len(successful_tests),
+                'n_total_tests': len(results['statistics_comparison']),
+                'avg_parameter_error': avg_error,
+                'avg_estimation_time': avg_time
+            }
 
-            print(f"✓ {test_name} completed")
+            self._print(f"\nSummary: {len(successful_tests)}/{len(results['statistics_comparison'])} tests successful",
+                        1)
+            self._print(f"Average parameter error: {avg_error:.4f}", 1)
+            self._print(f"Average estimation time: {avg_time:.3f}s", 1)
 
-        except Exception as e:
-            print(f"✗ {test_name} failed: {e}")
-
-    print("\n" + "=" * 60)
-    print("Test suite completed!")
-    print("=" * 60)
-
-    return suite.results
-
-
-# Quick usage example
-if __name__ == "__main__":
-    # Run all tests with quick config
-    results = run_all_tests('quick')
-
-    # Or run specific tests
-    # results = run_all_tests('basic', ['beta_model', 'robust_filtering'])
+        self.results['mle_estimation'] = results
+        return results

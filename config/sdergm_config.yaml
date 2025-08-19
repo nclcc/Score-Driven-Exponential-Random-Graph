@@ -1,0 +1,355 @@
+# ====================================================================
+# SD-ERGM Test Suite Configuration File
+# ====================================================================
+# This configuration file allows customization of test parameters,
+# data generation, and filter settings without modifying the code.
+# Author: @nclcc, niciccarone@gmail.com
+# ====================================================================
+
+# Global test settings
+global:
+  verbose: true
+  save_results: true
+  random_seed: 42
+  output_directory: "./results"
+
+# Test selection - set to true to run, false to skip
+tests_to_run:
+  beta_model: true
+  pseudo_likelihood: true
+  robust_filtering: true
+  online_learning: true
+  hierarchical_networks: true
+  bayesian_inference: true
+  financial_application: true
+  scalability: true
+  convergence: true
+  mle_estimation: true
+
+# Test configurations (quick, basic, advanced, custom)
+test_configs:
+  quick:
+    n_nodes: 8
+    T: 50
+    n_replications: 5
+
+  basic:
+    n_nodes: 10
+    T: 100
+    n_replications: 20
+
+  advanced:
+    n_nodes: 15
+    T: 150
+    n_replications: 10
+
+  custom:
+    n_nodes: 12
+    T: 80
+    n_replications: 15
+
+# Default configuration to use
+default_config: "basic"
+
+# Data generation parameters
+data_generation:
+  # DGP types and their parameters
+  dgp_types:
+    constant:
+      enabled: true
+      params: {}
+
+    sinusoidal:
+      enabled: true
+      params:
+        amplitude: 0.2
+        frequency: 0.1  # Optional: cycles per time unit
+
+    step:
+      enabled: true
+      params:
+        step_size: 0.3
+        step_time: null  # null for T/2, or specify integer
+
+    ar1:
+      enabled: true
+      params:
+        phi: 0.9
+        sigma: 0.1
+
+    # Custom DGP parameters
+    custom_dgp:
+      enabled: false
+      params:
+        type: "mixed"  # Can implement custom types
+        mixing_weight: 0.5
+
+  # Initial parameter settings
+  initial_parameters:
+    beta_model:
+      mean: 0.0
+      std: 0.5
+      custom_theta_0: null  # Can specify array here
+
+    pseudo_likelihood:
+      edges_param: -2.0
+      other_params: 0.5
+      custom_theta_0: null
+
+# SD-ERGM filter parameters
+filter_parameters:
+  beta_model:
+    w_multiplier: 0.1  # w = w_multiplier * theta_0
+    alpha: 0.1
+    beta: 0.9
+    custom_w: null  # Can specify custom w array
+    custom_alpha: null
+    custom_beta: null
+
+  pseudo_likelihood:
+    w_multiplier: 0.05
+    alpha: 0.05
+    beta: 0.95
+    custom_w: null
+    custom_alpha: null
+    custom_beta: null
+
+# Test-specific configurations
+test_specific:
+
+  # Beta model test settings
+  beta_model:
+    dgp_types_to_test: ["constant", "sinusoidal", "step", "ar1"]
+    compute_cross_sectional: true
+
+  # Pseudo-likelihood test settings
+  pseudo_likelihood:
+    statistics_sets:
+      - name: "Basic"
+        statistics: ["edges"]
+
+      - name: "GWESP"
+        statistics: ["edges", "gwesp"]
+        gwesp_decay: 0.5
+
+      - name: "Complex"
+        statistics: ["edges", "gwesp", "triangles"]
+        gwesp_decay: 0.5
+
+      - name: "Custom"
+        statistics: ["edges", "reciprocity", "twostars"]
+        enabled: false
+
+  # Robust filtering settings
+  robust_filtering:
+    outlier_threshold: 2.5
+    n_outliers_ratio: 0.05  # Fraction of T for outliers
+    outlier_density: 0.8
+    detection_metrics: true
+
+  # Online learning settings
+  online_learning:
+    forgetting_factor: 0.95
+    batch_comparison: true
+    compute_variance: true
+
+  # Hierarchical networks settings
+  hierarchical_networks:
+    n_layers: 3
+    max_nodes: 12
+    shared_statistics: false
+    coupling_strengths: [0.0, 0.1, 0.2]
+    layer_connectivity:
+      - level: "high"
+        params: [-1.8, 0.6]
+      - level: "medium"
+        params: [-2.5, 0.4]
+      - level: "low"
+        params: [-3.2, 0.3]
+
+  # Bayesian inference settings
+  bayesian_inference:
+    n_nodes_override: 6  # Use smaller network
+    T_override: 30
+    mcmc:
+      n_samples: 100
+      n_burn: 50
+      thin: 1
+    prior_params:
+      w_sd: 0.5
+      alpha_shape: 2.0
+      alpha_scale: 0.05
+      beta_a: 8.0
+      beta_b: 2.0
+    compute_coverage: true
+    credible_interval: 0.95
+
+  # Financial application settings
+  financial_application:
+    n_banks: 15
+    T_total: 60
+    phases:
+      pre_crisis:
+        fraction: 0.333
+        theta: [-1.5, 0.8, 0.2, 0.15]
+        dgp: "ar1"
+        dgp_params:
+          phi: 0.95
+          sigma: 0.05
+
+      crisis:
+        fraction: 0.333
+        theta: [-2.5, 0.3, 0.6, 0.4]
+        dgp: "step"
+        dgp_params:
+          step_size: 0.0
+
+      recovery:
+        fraction: 0.334
+        theta: [-2.0, 0.5, 0.4, 0.25]
+        dgp: "sinusoidal"
+        dgp_params:
+          amplitude: 0.1
+
+    stress_scenarios:
+      liquidity_freeze:
+        edge_shock: -0.6
+        concentration_shock: 0.2
+
+      bank_failure:
+        edge_shock: -0.4
+        concentration_shock: 0.5
+
+      custom_scenario:
+        enabled: false
+        edge_shock: -0.5
+        concentration_shock: 0.35
+
+    early_warning:
+      window_size: 5
+      warning_threshold_percentile: 90
+      lookback_window: 10
+
+  # Scalability test settings
+  scalability:
+    network_sizes: [5, 10, 15, 20, 25]
+    T_fixed: 50
+    test_pseudo_likelihood_max_size: 15
+    compute_density: true
+
+  # Convergence test settings
+  convergence:
+    T_override: 200
+    alpha_values: [0.01, 0.05, 0.1, 0.2]
+    beta_fixed: 0.9
+    convergence_window: 10
+    variance_threshold: 0.01
+    change_type: "step"
+    change_magnitude: 0.5
+
+  # MLE estimation test settings
+  mle_estimation:
+    max_nodes: 10
+    beta_model:
+      test_estimation: true
+      param_std: 0.5
+
+    pseudo_likelihood:
+      statistics_combinations:
+        - name: "Edges only"
+          statistics: ["edges"]
+          enabled: true
+
+        - name: "Edges + Reciprocity"
+          statistics: ["edges", "reciprocity"]
+          enabled: true
+
+        - name: "Edges + GWESP"
+          statistics: ["edges", "gwesp"]
+          gwesp_decay: 0.5
+          enabled: true
+
+        - name: "Edges + Triangles"
+          statistics: ["edges", "triangles"]
+          enabled: true
+
+        - name: "Edges + TwoStars"
+          statistics: ["edges", "twostars"]
+          enabled: true
+
+        - name: "Full suite"
+          statistics: ["edges", "gwesp", "reciprocity", "triangles"]
+          gwesp_decay: 0.5
+          enabled: true
+
+      optimization:
+        method: "BFGS"
+        maxiter: 500
+        gtol: 1.0e-5
+        initial_theta_std: 0.1
+        edges_init: -2.0
+
+# Output and reporting settings
+output:
+  format: "json"  # json, csv, or both
+  include_plots: true
+  plot_formats: ["png", "pdf"]
+  summary_report: true
+  detailed_results: true
+
+  # Specific outputs per test
+  test_outputs:
+    beta_model:
+      save_filtered_params: true
+      save_rmse_comparison: true
+
+    robust_filtering:
+      save_outlier_detection: true
+
+    online_learning:
+      save_convergence_path: true
+
+    hierarchical_networks:
+      save_layer_correlations: true
+
+    bayesian_inference:
+      save_posterior_samples: false  # Can be large
+      save_credible_intervals: true
+
+    financial_application:
+      save_risk_indicators: true
+      save_stress_results: true
+
+    scalability:
+      save_timing_plots: true
+
+    convergence:
+      save_convergence_curves: true
+
+# Performance and optimization settings
+performance:
+  parallel_processing: false  # Enable if available
+  max_workers: 4
+  cache_statistics: true
+  use_jit: false  # Just-in-time compilation if available
+
+# Logging configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  file: "sdergm_tests.log"
+  console: true
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Validation settings
+validation:
+  check_parameters: true
+  check_convergence: true
+  max_iterations_warning: 1000
+  numerical_tolerance: 1.0e-10
+
+# Advanced customization hooks
+custom_hooks:
+  pre_test: null  # Path to Python file with pre_test() function
+  post_test: null  # Path to Python file with post_test() function
+  custom_statistics: null  # Path to file defining custom statistics
+  custom_dgp: null  # Path to file defining custom DGP
