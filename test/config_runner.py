@@ -392,7 +392,7 @@ def create_custom_statistics(config: Dict):
 # Example usage
 if __name__ == "__main__":
     # Example 1: Run with default configuration
-    results = run_configured_tests("sdergm_config.yaml")
+    results = run_configured_tests("config/sdergm_config.yaml")
 
     # Example 2: Run specific tests only
     results = run_configured_tests(
@@ -401,5 +401,5 @@ if __name__ == "__main__":
     )
 
     # Example 3: Load config and inspect
-    config = load_config("sdergm_config.yaml")
+    config = load_config("config/sdergm_config.yaml")
     print("Tests enabled:", [k for k, v in config['tests_to_run'].items() if v])
