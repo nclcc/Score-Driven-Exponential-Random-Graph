@@ -391,6 +391,7 @@ def create_custom_statistics(config: Dict):
 
 # Example usage
 if __name__ == "__main__":
+
     # Example 1: Run with default configuration
     results = run_configured_tests("config/sdergm_config.yaml")
 
