@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.optimize as opt
 import scipy.stats as stats
+from scipy.special import expit
 from typing import List, Optional, Tuple, Dict
 
 
@@ -13,6 +14,7 @@ class ScoreDrivenERGM:
 
     def __init__(self, model_type: str = 'beta', **kwargs):
         self.model_type = model_type
+        self.n_nodes = kwargs.get("n_nodes", 10)
 
         if model_type == 'beta':
             # Import here to avoid circular import
@@ -52,9 +54,10 @@ class ScoreDrivenERGM:
             # For pseudo-likelihood models, use MCMC simulation
             return self._mcmc_simulation(theta)
 
-    def _mcmc_simulation(self, theta: np.ndarray, n_nodes: int = 10,
+    def _mcmc_simulation(self, theta: np.ndarray, n_nodes: Optional[int] = None,
                          n_steps: int = 1000) -> np.ndarray:
         """MCMC simulation for general ERGM"""
+        n_nodes = self.n_nodes if n_nodes is None else n_nodes
         # Initialize random network
         adjacency_matrix = np.random.binomial(1, 0.1, size=(n_nodes, n_nodes))
         np.fill_diagonal(adjacency_matrix, 0)
@@ -71,13 +74,10 @@ class ScoreDrivenERGM:
                                      for stat in self.statistics])
             delta_logp = np.dot(theta, change_stats)
 
-            # Accept/reject
-            if adjacency_matrix[i, j] == 0:  # Propose adding edge
-                if np.random.random() < 1.0 / (1.0 + np.exp(-delta_logp)):
-                    adjacency_matrix[i, j] = 1
-            else:  # Propose removing edge
-                if np.random.random() < 1.0 / (1.0 + np.exp(delta_logp)):
-                    adjacency_matrix[i, j] = 0
+            # Symmetric edge-toggle Barker update: delta_logp already contains
+            # the sign for both additions and removals. This obeys detailed balance.
+            if np.random.random() < expit(delta_logp):
+                adjacency_matrix[i, j] = 1 - adjacency_matrix[i, j]
 
         return adjacency_matrix
 
@@ -110,6 +110,8 @@ class ScoreDrivenERGM:
                           theta_init: Optional[np.ndarray] = None) -> np.ndarray:
         """Filter time-varying parameters using score-driven dynamics"""
         T = len(adjacency_sequence)
+        if T == 0:
+            raise ValueError("adjacency_sequence must not be empty")
 
         if theta_init is None:
             theta_init = np.zeros(self.n_params)
@@ -130,40 +132,24 @@ class ScoreDrivenERGM:
                                       adjacency_sequence: List[np.ndarray],
                                       theta_filtered: np.ndarray) -> float:
         """Log-likelihood for static parameter estimation"""
-        T, n_params = theta_filtered.shape
+        from data_handler.data_structures import SDERGMParams
+        n = self.n_params
+        sd_params = SDERGMParams(params[:n], params[n:2*n], params[2*n:])
+        filtered = self.filter_parameters(adjacency_sequence, sd_params, theta_filtered[0])
+        return self._observation_log_likelihood(adjacency_sequence, filtered)
 
-        # Unpack parameters
-        w = params[:n_params]
-        alpha = params[n_params:2 * n_params]
-        beta = params[2 * n_params:3 * n_params]
-
-        log_lik = 0.0
-
-        for t in range(1, T):
-            # Compute score at time t-1
+    def _observation_log_likelihood(self, adjacency_sequence, theta_filtered):
+        value = 0.
+        for y, theta in zip(adjacency_sequence, theta_filtered):
             if self.model_type == 'beta':
-                n_half = n_params // 2
-                in_params = theta_filtered[t - 1, :n_half]
-                out_params = theta_filtered[t - 1, n_half:]
-                in_score, out_score = self.model.compute_score(
-                    adjacency_sequence[t - 1], in_params, out_params)
-                score = np.concatenate([in_score, out_score])
-            elif self.model_type == 'pseudo':
-                score = self.model.compute_pseudo_score(
-                    adjacency_sequence[t - 1], theta_filtered[t - 1])
-
-            # Predicted theta_t
-            theta_pred = w + beta * theta_filtered[t - 1] + alpha * score
-
-            # Add to log-likelihood (assuming conditional normality)
-            residual = theta_filtered[t] - theta_pred
-            log_lik += -0.5 * np.sum(residual ** 2)
-
-        return log_lik
+                value += self.model.log_likelihood(y, theta[:self.n_nodes], theta[self.n_nodes:])
+            else:
+                value += self.model.log_pseudo_likelihood(y, theta)
+        return float(value)
 
     def estimate_static_parameters(self, adjacency_sequence: List[np.ndarray],
                                    theta_filtered: np.ndarray):  # Remove type hint
-        """Estimate static parameters w, alpha, beta via MLE"""
+        """Conditional observation MLE (pseudo-MLE for dependent-edge models)."""
         from data_handler.data_structures import SDERGMParams
 
         T, n_params = theta_filtered.shape
@@ -179,9 +165,13 @@ class ScoreDrivenERGM:
         result = opt.minimize(
             lambda p: -self._static_params_log_likelihood(p, adjacency_sequence, theta_filtered),
             params_init,
-            method='BFGS',
+            method='L-BFGS-B',
+            bounds=[(None, None)] * n_params + [(0., None)] * n_params + [(0., 1. - 1e-6)] * n_params,
             options={'maxiter': 1000}
         )
+
+        if not result.success or not np.isfinite(result.fun):
+            raise RuntimeError(f"Static parameter estimation failed: {result.message}")
 
         # Extract optimized parameters
         w_opt = result.x[:n_params]
@@ -211,13 +201,13 @@ class HierarchicalSDERGM:
                 from data_handler.data_structures import EdgesStatistic, GWESPStatistic
                 # Same statistics across layers
                 statistics = [EdgesStatistic(), GWESPStatistic()]
-                model = ScoreDrivenERGM(model_type='pseudo', statistics=statistics)
+                model = ScoreDrivenERGM(model_type='pseudo', n_nodes=n_nodes, statistics=statistics)
             else:
                 # Import here to avoid circular import
                 from data_handler.data_structures import EdgesStatistic, GWESPStatistic
                 # Layer-specific statistics (could be different)
                 statistics = [EdgesStatistic(), GWESPStatistic(decay=0.5 + 0.1 * layer)]
-                model = ScoreDrivenERGM(model_type='pseudo', statistics=statistics)
+                model = ScoreDrivenERGM(model_type='pseudo', n_nodes=n_nodes, statistics=statistics)
 
             self.layer_models.append(model)
 
@@ -410,111 +400,91 @@ class OnlineSDERGM:
 
 
 class BayesianSDERGM:
-    """Bayesian version of SD-ERGM with uncertainty quantification"""
+    """Conditional Bayesian beta-model inference; pseudo-posterior for other ERGMs.
+
+    Uses symmetric block random-walk proposals in the original coordinates.
+    Out-of-support proposals are rejected, not redrawn or clipped, so no
+    truncation correction or transformation Jacobian is needed.
+    """
 
     def __init__(self, base_model: ScoreDrivenERGM, prior_params: Dict):
         self.base_model = base_model
-        self.prior_params = prior_params
+        self.prior_params = {
+            'w_sd': 1., 'alpha_shape': 2., 'alpha_scale': .05,
+            'beta_a': 9., 'beta_b': 1., **prior_params
+        }
+        if any(not np.isfinite(v) or v <= 0 for v in self.prior_params.values()):
+            raise ValueError("Prior scales and shapes must be finite and positive")
+
+    def _log_posterior(self, observations, w, alpha, beta):
+        from data_handler.data_structures import SDERGMParams
+        if (not np.all(np.isfinite(np.r_[w, alpha, beta])) or
+                np.any(alpha <= 0) or np.any(beta <= 0) or np.any(beta >= 1)):
+            return -np.inf, None
+        priors = self.prior_params
+        with np.errstate(over='ignore', invalid='ignore'):
+            theta = self.base_model.filter_parameters(observations, SDERGMParams(w, alpha, beta))
+            if not np.all(np.isfinite(theta)):
+                return -np.inf, None
+            value = self.base_model._observation_log_likelihood(observations, theta)
+            value += stats.norm.logpdf(w, scale=priors['w_sd']).sum()
+            value += stats.gamma.logpdf(alpha, a=priors['alpha_shape'], scale=priors['alpha_scale']).sum()
+            value += stats.beta.logpdf(beta, a=priors['beta_a'], b=priors['beta_b']).sum()
+        return (float(value), theta) if np.isfinite(value) else (-np.inf, None)
 
     def mcmc_estimation(self, adjacency_sequence: List[np.ndarray],
-                        n_samples: int = 1000, n_burn: int = 500) -> Dict:
-        """MCMC estimation of SD-ERGM parameters with full uncertainty"""
-        from data_handler.data_structures import SDERGMParams
+                        n_samples: int = 1000, n_burn: int = 500,
+                        random_state=None, proposal_scales=None) -> Dict:
+        """Sample all parameter blocks using one full-data target.
 
-        T = len(adjacency_sequence)
-        n_params = self.base_model.n_params
-
-        # Storage for MCMC samples
-        w_samples = np.zeros((n_samples, n_params))
-        alpha_samples = np.zeros((n_samples, n_params))
-        beta_samples = np.zeros((n_samples, n_params))
-        theta_samples = np.zeros((n_samples, T, n_params))
-
-        # Initialize
-        w_current = np.random.normal(0, 0.1, n_params)
-        alpha_current = np.random.gamma(2, 0.05, n_params)  # Positive constraint
-        beta_current = np.random.beta(9, 1, n_params)  # [0,1] constraint
-
-        # Proposal covariances
-        w_cov = 0.01 * np.eye(n_params)
-        alpha_cov = 0.001 * np.eye(n_params)
-        beta_cov = 0.001 * np.eye(n_params)
-
-        for iteration in range(n_samples + n_burn):
-            # Sample theta sequence given parameters
-            sd_params = SDERGMParams(w=w_current, alpha=alpha_current, beta=beta_current)
-            theta_current = self.base_model.filter_parameters(adjacency_sequence, sd_params)
-
-            # Compute log-likelihood
-            log_likelihood = 0.0
-            for t in range(T):
-                if self.base_model.model_type == 'beta':
-                    n_half = n_params // 2
-                    log_likelihood += self.base_model.model.log_likelihood(
-                        adjacency_sequence[t], theta_current[t, :n_half], theta_current[t, n_half:]
-                    )
-                else:
-                    log_likelihood += self.base_model.model.log_pseudo_likelihood(
-                        adjacency_sequence[t], theta_current[t]
-                    )
-
-            # Add priors
-            log_prior = (stats.norm.logpdf(w_current, 0, self.prior_params.get('w_sd', 1.0)).sum() +
-                         stats.gamma.logpdf(alpha_current, 2, scale=0.05).sum() +
-                         stats.beta.logpdf(beta_current, 9, 1).sum())
-
-            log_posterior_current = log_likelihood + log_prior
-
-            # Metropolis-Hastings updates
-            # Update w
-            w_proposal = np.random.multivariate_normal(w_current, w_cov)
-            sd_params_prop = SDERGMParams(w=w_proposal, alpha=alpha_current, beta=beta_current)
-            theta_prop = self.base_model.filter_parameters(adjacency_sequence, sd_params_prop)
-
-            # Compute proposal likelihood (simplified for efficiency)
-            log_likelihood_prop = 0.0
-            for t in range(min(T, 10)):  # Sample subset for efficiency
-                if self.base_model.model_type == 'beta':
-                    n_half = n_params // 2
-                    log_likelihood_prop += self.base_model.model.log_likelihood(
-                        adjacency_sequence[t], theta_prop[t, :n_half], theta_prop[t, n_half:]
-                    )
-
-            log_prior_prop = stats.norm.logpdf(w_proposal, 0, self.prior_params.get('w_sd', 1.0)).sum()
-            log_posterior_prop = log_likelihood_prop + log_prior_prop
-
-            # Accept/reject
-            if np.log(np.random.random()) < log_posterior_prop - log_posterior_current:
-                w_current = w_proposal
-                theta_current = theta_prop
-                log_posterior_current = log_posterior_prop
-
-            # Similar updates for alpha and beta (simplified here)
-            # In practice, would implement full updates for all parameters
-
-            # Store samples (after burn-in)
+        Acceptance rates and traces are diagnostics, not proof of convergence.
+        The initial filtered state is fixed to zero for this conditional target.
+        """
+        if len(adjacency_sequence) == 0:
+            raise ValueError("adjacency_sequence must not be empty")
+        if not isinstance(n_samples, (int, np.integer)) or n_samples < 1:
+            raise ValueError("n_samples must be a positive integer")
+        if not isinstance(n_burn, (int, np.integer)) or n_burn < 0:
+            raise ValueError("n_burn must be a nonnegative integer")
+        rng = np.random.default_rng(random_state)
+        n, T = self.base_model.n_params, len(adjacency_sequence)
+        p = self.prior_params
+        current = dict(w=rng.normal(0, .1, n),
+                       alpha=rng.gamma(p['alpha_shape'], p['alpha_scale'], n),
+                       beta=rng.beta(p['beta_a'], p['beta_b'], n))
+        scales = {'w': .1, 'alpha': .025, 'beta': .025, **(proposal_scales or {})}
+        if set(scales) != set(current) or any(not np.isfinite(v) or v <= 0 for v in scales.values()):
+            raise ValueError("Proposal scales must be positive finite values for w, alpha and beta")
+        traces = {name: np.empty((n_samples, n)) for name in current}
+        theta_samples = np.empty((n_samples, T, n))
+        posterior_trace = np.empty(n_samples)
+        accepted = {name: 0 for name in current}
+        posterior, theta = self._log_posterior(adjacency_sequence, **current)
+        if not np.isfinite(posterior):
+            raise ValueError("Initial posterior is nonfinite; check data and prior settings")
+        iterations = n_samples + n_burn
+        for iteration in range(iterations):
+            for name in current:
+                proposal = {key: value.copy() for key, value in current.items()}
+                proposal[name] += rng.normal(0, scales[name], n)
+                proposed_posterior, proposed_theta = self._log_posterior(adjacency_sequence, **proposal)
+                if np.log(rng.random()) < proposed_posterior - posterior:
+                    current, posterior, theta = proposal, proposed_posterior, proposed_theta
+                    accepted[name] += 1
             if iteration >= n_burn:
-                sample_idx = iteration - n_burn
-                w_samples[sample_idx] = w_current
-                alpha_samples[sample_idx] = alpha_current
-                beta_samples[sample_idx] = beta_current
-                theta_samples[sample_idx] = theta_current
-
+                index = iteration - n_burn
+                for name in current:
+                    traces[name][index] = current[name]
+                theta_samples[index] = theta
+                posterior_trace[index] = posterior
         return {
-            'w_samples': w_samples,
-            'alpha_samples': alpha_samples,
-            'beta_samples': beta_samples,
+            **{name + '_samples': trace for name, trace in traces.items()},
             'theta_samples': theta_samples,
-            'posterior_mean': {
-                'w': np.mean(w_samples, axis=0),
-                'alpha': np.mean(alpha_samples, axis=0),
-                'beta': np.mean(beta_samples, axis=0)
-            },
-            'posterior_std': {
-                'w': np.std(w_samples, axis=0),
-                'alpha': np.std(alpha_samples, axis=0),
-                'beta': np.std(beta_samples, axis=0)
-            }
+            'posterior_mean': {name: trace.mean(axis=0) for name, trace in traces.items()},
+            'posterior_std': {name: trace.std(axis=0) for name, trace in traces.items()},
+            'log_posterior': posterior_trace,
+            'acceptance_rates': {name: count / iterations for name, count in accepted.items()},
+            'target': 'conditional_posterior' if self.base_model.model_type == 'beta' else 'conditional_pseudo_posterior'
         }
 
 
@@ -536,7 +506,7 @@ class FinancialNetworkApplication:
             SizeHeterogeneityStatistic()  # Bank size effects
         ]
 
-        self.model = ScoreDrivenERGM(model_type='pseudo', statistics=self.statistics)
+        self.model = ScoreDrivenERGM(model_type='pseudo', n_nodes=n_banks, statistics=self.statistics)
 
     def systemic_risk_indicator(self, adjacency_sequence: List[np.ndarray],
                                 theta_filtered: np.ndarray) -> np.ndarray:

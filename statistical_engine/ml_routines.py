@@ -2,6 +2,7 @@ import warnings
 
 import numpy as np
 import scipy.optimize as opt
+from scipy.special import expit
 from typing import Tuple, List, Optional
 
 
@@ -15,58 +16,24 @@ class FastBetaModel:
 
     def log_likelihood(self, adjacency_matrix: np.ndarray,
                        in_params: np.ndarray, out_params: np.ndarray) -> float:
-        """Fast log-likelihood computation for beta model"""
-        # Apply identification constraint: sum of in_params = sum of out_params
-        in_params = in_params - np.mean(in_params) + np.mean(out_params)
-
-        # Compute probability matrix
-        prob_matrix = self._compute_prob_matrix(in_params, out_params)
-
-        # Log-likelihood computation
-        log_lik = 0.0
-        for i in range(self.n_nodes):
-            for j in range(self.n_nodes):
-                if i != j:  # No self-loops
-                    if adjacency_matrix[i, j] == 1:
-                        log_lik += np.log(prob_matrix[i, j] + 1e-10)
-                    else:
-                        log_lik += np.log(1 - prob_matrix[i, j] + 1e-10)
-
-        return log_lik
+        """Directed Bernoulli likelihood; theta_in indexes targets (columns)."""
+        logits = out_params[:, None] + in_params[None, :]
+        mask = ~np.eye(self.n_nodes, dtype=bool)
+        y = adjacency_matrix[mask]
+        z = logits[mask]
+        return float(np.sum(y * z - np.logaddexp(0, z)))
 
     def _compute_prob_matrix(self, in_params: np.ndarray, out_params: np.ndarray) -> np.ndarray:
-        """Compute edge probability matrix"""
-        prob_matrix = np.zeros((self.n_nodes, self.n_nodes))
-
-        for i in range(self.n_nodes):
-            for j in range(self.n_nodes):
-                if i != j:
-                    linear_predictor = in_params[i] + out_params[j]
-                    prob_matrix[i, j] = 1.0 / (1.0 + np.exp(-linear_predictor))
-
-        return prob_matrix
+        probabilities = expit(out_params[:, None] + in_params[None, :])
+        np.fill_diagonal(probabilities, 0.)
+        return probabilities
 
     def compute_score(self, adjacency_matrix: np.ndarray,
                       in_params: np.ndarray, out_params: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Compute score (gradient) of log-likelihood"""
-        prob_matrix = self._compute_prob_matrix(in_params, out_params)
-
-        in_score = np.zeros(self.n_nodes)
-        out_score = np.zeros(self.n_nodes)
-
-        # Compute in-degree scores
-        for i in range(self.n_nodes):
-            for j in range(self.n_nodes):
-                if i != j:
-                    in_score[i] += adjacency_matrix[j, i] - prob_matrix[j, i]
-
-        # Compute out-degree scores
-        for j in range(self.n_nodes):
-            for i in range(self.n_nodes):
-                if i != j:
-                    out_score[j] += adjacency_matrix[i, j] - prob_matrix[i, j]
-
-        return in_score, out_score
+        residual = adjacency_matrix - self._compute_prob_matrix(in_params, out_params)
+        residual = residual.copy()
+        np.fill_diagonal(residual, 0.)
+        return residual.sum(axis=0), residual.sum(axis=1)
 
     def _mle_objective(self, params: np.ndarray, adjacency_matrix: np.ndarray) -> float:
         """Objective function for MLE optimization"""
@@ -76,7 +43,8 @@ class FastBetaModel:
         return -self.log_likelihood(adjacency_matrix, in_p, out_p)
 
     def mle_estimate(self, adjacency_matrix: np.ndarray,
-                     initial_params: Optional[Tuple[np.ndarray, np.ndarray]] = None) -> Tuple[np.ndarray, np.ndarray]:
+                     initial_params: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+                     maxiter: int = 1000, gtol: float = 1e-6) -> Tuple[np.ndarray, np.ndarray]:
         """Maximum likelihood estimation using optimized routines"""
         if initial_params is None:
             # Initialize with degree-based estimates
@@ -87,23 +55,21 @@ class FastBetaModel:
         else:
             in_params_init, out_params_init = initial_params
 
-        # Combine parameters for optimization
-        params_init = np.concatenate([in_params_init, out_params_init])
+        # Fix the last incoming coefficient to zero. The transformation leaves
+        # every edge logit unchanged and removes the additive identification ridge.
+        offset = in_params_init[-1]
+        params_init = np.r_[in_params_init[:-1] - offset, out_params_init + offset]
 
-        # Optimize using BFGS
+        def unpack(params):
+            return np.r_[params[:self.n_nodes - 1], 0.], params[self.n_nodes - 1:]
+
         result = opt.minimize(
-            self._mle_objective,
-            params_init,
-            args=(adjacency_matrix,),
-            method='BFGS',
-            options={'maxiter': 1000, 'gtol': 1e-6}
+            lambda x: -self.log_likelihood(adjacency_matrix, *unpack(x)),
+            params_init, method='BFGS', options={'maxiter': maxiter, 'gtol': gtol}
         )
-
         if not result.success:
-            warnings.warn("MLE optimization did not converge")
-
-        n_half = len(result.x) // 2
-        return result.x[:n_half], result.x[n_half:]
+            warnings.warn(f"MLE optimization did not converge: {result.message}")
+        return unpack(result.x)
 
 
 class FastPseudoLikelihood:
@@ -154,13 +120,10 @@ class FastPseudoLikelihood:
                 if i == j:
                     continue
                 # compute change statistics vector for the dyad (i,j)
-                change_stats = np.array([stat.change_statistic(adjacency_matrix, i, j) for stat in self.statistics])
+                change_stats = np.array([(1.0 - 2.0 * adjacency_matrix[i, j]) * stat.change_statistic(adjacency_matrix, i, j) for stat in self.statistics])
                 linear_pred = float(np.dot(theta, change_stats))
-                p = 1.0 / (1.0 + np.exp(-linear_pred))
-                if adjacency_matrix[i, j] == 1:
-                    log_pl += np.log(p + eps)
-                else:
-                    log_pl += np.log(1.0 - p + eps)
+                p = expit(linear_pred)
+                log_pl += adjacency_matrix[i, j] * linear_pred - np.logaddexp(0, linear_pred)
         return float(log_pl)
 
     def compute_pseudo_score(self, adjacency_matrix: np.ndarray, theta: np.ndarray) -> np.ndarray:
@@ -176,9 +139,9 @@ class FastPseudoLikelihood:
             for j in range(n):
                 if i == j:
                     continue
-                change_stats = np.array([stat.change_statistic(adjacency_matrix, i, j) for stat in self.statistics])
+                change_stats = np.array([(1.0 - 2.0 * adjacency_matrix[i, j]) * stat.change_statistic(adjacency_matrix, i, j) for stat in self.statistics])
                 linear_pred = float(np.dot(theta, change_stats))
-                p = 1.0 / (1.0 + np.exp(-linear_pred))
+                p = expit(linear_pred)
                 score += change_stats * (adjacency_matrix[i, j] - p)
         return score
 
@@ -190,8 +153,8 @@ class FastPseudoLikelihood:
         if self.n_nodes is None:
             self.n_nodes = in_params.shape[0]
         n = self.n_nodes
-        L = in_params.reshape((n, 1)) + out_params.reshape((1, n))
-        P = 1.0 / (1.0 + np.exp(-L))
+        L = out_params.reshape((n, 1)) + in_params.reshape((1, n))
+        P = expit(L)
         np.fill_diagonal(P, 0.0)
         return P
 
@@ -206,14 +169,7 @@ class FastPseudoLikelihood:
         if in_params.shape[0] != n or out_params.shape[0] != n:
             raise ValueError("in_params and out_params must each have length n_nodes")
 
-        # compute probabilities and vectorized log-likelihood
-        P = self._compute_prob_matrix_beta(in_params, out_params)
-        mask = ~np.eye(n, dtype=bool)
-        eps = 1e-10
-        adj_vals = adjacency_matrix[mask]
-        prob_vals = P[mask]
-        log_lik = np.sum(adj_vals * np.log(prob_vals + eps) + (1 - adj_vals) * np.log(1 - prob_vals + eps))
-        return float(log_lik)
+        return FastBetaModel(n).log_likelihood(adjacency_matrix, in_params, out_params)
 
     def compute_score(self, adjacency_matrix: np.ndarray,
                       in_params: np.ndarray, out_params: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -265,20 +221,4 @@ class FastPseudoLikelihood:
             if in_init.shape[0] != n or out_init.shape[0] != n:
                 raise ValueError("initial_params must be two arrays of length n_nodes")
 
-        params_init = np.concatenate([in_init, out_init])
-
-        result = opt.minimize(
-            self._mle_objective_beta,
-            params_init,
-            args=(adjacency_matrix,),
-            method='BFGS',
-            options={'maxiter': maxiter, 'gtol': gtol}
-        )
-
-        if not result.success:
-            warnings.warn(f"MLE optimization did not converge: {result.message}")
-
-        n_half = len(result.x) // 2
-        in_hat = result.x[:n_half]
-        out_hat = result.x[n_half:]
-        return in_hat, out_hat
+        return FastBetaModel(n).mle_estimate(adjacency_matrix, (in_init, out_init), maxiter=maxiter, gtol=gtol)
