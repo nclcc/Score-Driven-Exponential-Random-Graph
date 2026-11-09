@@ -26,11 +26,11 @@ class DataGenerator:
         n_params = len(theta_0)
         theta_sequence = np.zeros((T, n_params))
 
+        phases = np.random.uniform(0, 2 * np.pi, n_params)
         for t in range(T):
             for i in range(n_params):
                 if i % 2 == 1:  # Vary odd-indexed parameters
-                    phase = np.random.uniform(0, 2 * np.pi)  # Random phase per parameter
-                    theta_sequence[t, i] = theta_0[i] + amplitude * np.sin(4 * np.pi * t / T + phase)
+                    theta_sequence[t, i] = theta_0[i] + amplitude * np.sin(4 * np.pi * t / T + phases[i])
                 else:
                     theta_sequence[t, i] = theta_0[i]
 
@@ -224,9 +224,9 @@ class ReciprocityStatistic(NetworkStatistic):
 
     def change_statistic(self, adjacency_matrix: np.ndarray, i: int, j: int) -> float:
         if adjacency_matrix[i, j] == 0:  # Adding edge
-            return 1.0 if adjacency_matrix[j, i] == 1 else 0.0
+            return 2.0 if adjacency_matrix[j, i] == 1 else 0.0
         else:  # Removing edge
-            return -1.0 if adjacency_matrix[j, i] == 1 else 0.0
+            return -2.0 if adjacency_matrix[j, i] == 1 else 0.0
 
 
 class ConcentrationStatistic(NetworkStatistic):

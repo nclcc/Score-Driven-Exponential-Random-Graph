@@ -1,0 +1,5 @@
+numpy>=1.24,<3
+scipy>=1.10,<2
+pandas>=2.0,<4
+PyYAML>=6.0,<7
+pytest>=8.0,<10

@@ -23,7 +23,7 @@ from statistical_engine.score_random_network import (
     OnlineSDERGM, BayesianSDERGM, FinancialNetworkApplication
 )
 
-warnings.filterwarnings('ignore')
+
 
 
 class SDERGMTestSuite:
@@ -134,8 +134,11 @@ class SDERGMTestSuite:
             cs_time = time.time() - start_time
 
             # Compute metrics
-            rmse_sd = ModelEvaluator.compute_rmse(theta_true, theta_filtered)
-            rmse_cs = ModelEvaluator.compute_rmse(theta_true, theta_cs)
+            def edge_logits(path):
+                logits = path[:, cfg['n_nodes']:, None] + path[:, None, :cfg['n_nodes']]
+                return logits[:, ~np.eye(cfg['n_nodes'], dtype=bool)]
+            rmse_sd = ModelEvaluator.compute_rmse(edge_logits(theta_true), edge_logits(theta_filtered))
+            rmse_cs = ModelEvaluator.compute_rmse(edge_logits(theta_true), edge_logits(theta_cs))
 
             results['dgp_results'][dgp_type] = {
                 'rmse_sd': rmse_sd,
@@ -479,7 +482,7 @@ class SDERGMTestSuite:
         )
 
         # Bayesian estimation
-        self._print("Running Bayesian MCMC (simplified)...", 1)
+        self._print("Running conditional Bayesian MCMC...", 1)
 
         prior_params = {
             'w_sd': 0.5,
@@ -493,7 +496,7 @@ class SDERGMTestSuite:
 
         # Run simplified MCMC
         mcmc_results = bayesian_model.mcmc_estimation(
-            adjacency_sequence, n_samples=100, n_burn=50
+            adjacency_sequence, n_samples=100, n_burn=50, random_state=42
         )
 
         # Frequentist comparison
@@ -847,10 +850,11 @@ class SDERGMTestSuite:
         mle_time = time.time() - start_time
 
         # For fair comparison apply identification shift to true_in (same convention used in models)
-        true_in_adj = true_in_params - np.mean(true_in_params) + np.mean(true_out_params)
+        true_in_adj = true_in_params - true_in_params[-1]
+        true_out_adj = true_out_params + true_in_params[-1]
 
         in_error = float(np.mean(np.abs(true_in_adj - est_in_params)))
-        out_error = float(np.mean(np.abs(true_out_params - est_out_params)))
+        out_error = float(np.mean(np.abs(true_out_adj - est_out_params)))
 
         # Log-likelihood at true and estimated parameters
         ll_true = float(beta_model.log_likelihood(test_adjacency, true_in_params, true_out_params))

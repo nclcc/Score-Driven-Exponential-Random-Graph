@@ -16,7 +16,7 @@ import time
 from datetime import datetime
 
 
-def load_config(config_path: str = "sdergm_config.yaml") -> Dict:
+def load_config(config_path: str = "config/sdergm_config.yaml") -> Dict:
     """
     Load configuration from YAML file
 
@@ -113,7 +113,7 @@ def get_dgp_params(config: Dict, dgp_type: str) -> Dict:
     return {}
 
 
-def run_configured_tests(config_path: str = "sdergm_config.yaml",
+def run_configured_tests(config_path: str = "config/sdergm_config.yaml",
                          override_tests: Optional[List[str]] = None):
     """
     Run SD-ERGM tests based on YAML configuration
@@ -389,18 +389,11 @@ def create_custom_statistics(config: Dict):
     return statistics
 
 
-# Example usage
 if __name__ == "__main__":
-
-    # Example 1: Run with default configuration
-    results = run_configured_tests("config/sdergm_config.yaml")
-
-    # Example 2: Run specific tests only
-    results = run_configured_tests(
-        "sdergm_config.yaml",
-        override_tests=['beta_model', 'robust_filtering']
-    )
-
-    # Example 3: Load config and inspect
-    config = load_config("config/sdergm_config.yaml")
-    print("Tests enabled:", [k for k, v in config['tests_to_run'].items() if v])
+    import argparse
+    parser = argparse.ArgumentParser(description="Run exploratory SD-ERGM experiments")
+    parser.add_argument("config", nargs="?", default="config/sdergm_config.yaml")
+    parser.add_argument("--tests", nargs="+", help="Experiment names, e.g. beta_model")
+    args = parser.parse_args()
+    results = run_configured_tests(args.config, override_tests=args.tests)
+    raise SystemExit(int(any('error' in result for result in results.values())))
